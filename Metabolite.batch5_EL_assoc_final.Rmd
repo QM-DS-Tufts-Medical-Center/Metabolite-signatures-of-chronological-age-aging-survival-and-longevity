@@ -1,0 +1,374 @@
+---
+title: "EL signature - batch 5 = polr metabolite data"
+author: "Zeyuan Song & Paola Sebastiani"
+date: "January 2023"
+output:
+  html_document:
+    theme: united
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_collapse: false
+---
+
+# Initialize paths
+```{r}
+setwd("where you work")
+dir() 
+llfs.pheno.dir <-  where phenotypic data is
+llfs.metab5.dir <- where lipidomic data is
+annot.dir <- where annotation file is
+ 
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(Heatplus)
+library(tidyverse)
+library(coxme)
+library(GENESIS)
+suppressPackageStartupMessages(library(SeqArray))
+suppressPackageStartupMessages(library(SeqVarTools))
+library(Biobase)
+```
+
+# Read data and basic QC
+# Read LLFS list forbatch 4
+# use fake names of metabolites for analysis and annotate at the end
+```{r }
+llfs.data.batch5 <- read.csv(paste0(llfs.pheno.dir,  "pheno.data"), 
+                             header=T, na.strings = c("", NA))
+  table(llfs.data.batch5$EL)
+ 
+   met.5.llfs <- readr::read_csv(paste0(llfs.metab5.dir, "peak_areas_pos_neg_merged_imputed_normalized"))
+ 
+        n.metab <- ncol(met.5.llfs)-2
+     orig.metab.names <- names(met.5.llfs)[3:ncol(met.5.llfs)]
+     fake.metab.names <- paste0("metab", c(1:n.metab))
+     metab.look.up.table <- data.frame( orig.metab.names, fake.metab.names)
+     names(met.5.llfs)[3:ncol(met.5.llfs)] <- fake.metab.names
+```
+
+# Data  formatting-- for now analyze data at visit 1
+```{r }
+met.llfs <- met.5.llfs
+dim(met.llfs)
+ table(met.llfs$visitcode)
+ 
+met.llfs.vst1 <- met.llfs %>%
+  filter(visitcode==1 | visitcode==4 | visitcode==7)
+met.data.1 <- as.data.frame(t(met.llfs.vst1[ , 3:ncol(met.llfs.vst1)]))
+dim(met.data.1)
+colnames(met.data.1) <- met.llfs.vst1$subject
+```
+
+# Data visualization and outlier detection
+```{r }
+hist(apply(met.data.1,2,min))
+summary(apply(met.data.1,2,min))
+boxplot(log(met.data.1))
+
+pca.res <- prcomp(log(t(met.data.1)), scale. = T)
+  # summary(pca.res)
+   plot(pca.res)
+    plot(pca.res$x[,1:2])
+       outliers <- names(which(pca.res$x[,2] < -15))
+      print(outliers)
+      ok.samples <- setdiff(met.llfs.vst1$subject, outliers)
+  new.met.data.1 <- met.data.1 %>%
+    select(as.character(ok.samples))
+
+  pca.res <- prcomp(log(t(new.met.data.1)), scale. = T)
+  # summary(pca.res)
+   plot(pca.res)
+    plot(pca.res$x[,1:2])
+  
+
+    # Drop outliers  
+  met.llfs.vst1 <- met.llfs %>%
+   filter(visitcode==1 | visitcode==4 | visitcode==7) 
+    met.llfs.vst1 <- met.llfs.vst1[match(as.character(ok.samples), met.llfs.vst1$subject),]
+  
+     # now drop outliers
+    met.data.1 <- as.data.frame(met.llfs.vst1[ ,3:ncol(met.llfs.vst1)])
+    for(ind.col in 1:ncol(met.data.1)){
+          this.metab <- log(met.data.1[,ind.col])
+           this.mean <- mean(this.metab, na.rm=T)
+           this.var  <- var(this.metab, na.rm=T)
+              set.to.na <- which((this.metab > this.mean+4*sqrt(this.var)) | 
+                               (this.metab < this.mean-4*sqrt(this.var)))
+              met.data.1[set.to.na, ind.col ] <- exp(this.mean)
+    }
+    
+     met.llfs.vst1 <- data.frame(met.llfs.vst1[,1:2], met.data.1)
+     
+met.data.1 <- as.data.frame(t(met.llfs.vst1[ , 3:ncol(met.llfs.vst1)]))
+dim(met.data.1)
+colnames(met.data.1) <- met.llfs.vst1$subject
+
+my.annot <-names(met.data.1)
+   my.dat <- as.matrix(t(met.data.1)); dim(my.dat) <- dim(t(met.data.1)); my.dat <- t(my.dat)
+   my.map <- annHeatmap2(log(my.dat),ann=list(my.annot))
+plot(my.map)
+
+```
+No evident bias -- good normalization
+
+
+# analysis data
+```{r}
+llfs.master.vst1 <- llfs.data.batch5
+analysis.master.dat <- left_join(llfs.master.vst1, met.llfs.vst1, by="subject")
+ dim(analysis.master.dat)
+```
+
+# pca and grm
+```{r}
+pc.df <- read.csv(PCA data file here)
+
+grm <- readRDS(GRM file here)
+
+analysis.dat <- left_join(analysis.master.dat, pc.df, by=c("subject"="sample.id"))
+
+ggplot(analysis.dat, aes(PC1, PC2)) + geom_point()
+ggplot(analysis.dat, aes(PC3, PC4)) + geom_point()
+```
+
+# association
+```{r}
+analysis.final.dat <- analysis.dat %>%
+  mutate(FC_DK = FC == "DK") %>%
+  select(rownames(met.data.1), subject, EL, Sex, Education, FC_DK, PC1, PC2, PC3, PC4,htn_meds, lipid_meds, nitro_meds,
+         t2d_meds)
+dim(analysis.final.dat)
+#1717
+
+var.list <- c("EL", "Education","Sex","FC_DK","PC1","PC2","PC3","PC4","htn_meds","lipid_meds","nitro_meds","t2d_meds")
+summary(analysis.final.dat[,var.list])
+table(analysis.final.dat$EL)
+
+analysis.final.no.missing.dat <- na.omit(analysis.final.dat)
+dim(analysis.final.no.missing.dat)
+#1635
+
+analysis.final.no.missing.dat$EL <- as.factor(analysis.final.no.missing.dat$EL)
+table(analysis.final.no.missing.dat$EL)
+
+
+analysis.final.no.missing.dat[,rownames(met.data.1)] <- log(analysis.final.no.missing.dat[,rownames(met.data.1)])
+ write.table(analysis.final.no.missing.dat, "analysis.final.no.missing.dat.batch5.csv", sep=",", row.names=F)
+ 
+## read GDS file with snp data for linking with metabolomic data
+gds <- seqOpen(snp data input)
+
+id.dat <- data.frame(sample.id = seqGetData(gds, "sample.id"))
+analysis.final.no.missing.dat <- analysis.final.no.missing.dat %>%
+  mutate(subject = as.character(subject))
+annot <- left_join(id.dat, analysis.final.no.missing.dat, by=c("sample.id" = "subject"))
+
+seqData <- SeqVarData(gds, sampleData=AnnotatedDataFrame(annot))
+
+out_dat <- c()
+for(i in rownames(met.data.1)){
+  nullmod <- fitNullModel(seqData, outcome=i, 
+                        covars=c("EL", "Sex", "Education","FC_DK", "PC1", "PC2", "PC3", "PC4",
+                                 "htn_meds","lipid_meds","nitro_meds","t2d_meds"),
+                       cov.mat=grm,
+                        family="gaussian", verbose=F)
+
+  coeff <- nullmod$fixef
+  out_dat <- rbind(out_dat, data.frame(metabolite = i, n_obs = length(nullmod$W),
+                     EL_eff = coeff["ELEL","Est"], 
+                     EL_sd = coeff["ELEL","SE"], 
+                     EL_pval = coeff["ELEL","pval"], 
+                    Offs_eff = coeff["ELOffsp","Est"], 
+                    Offs_sd = coeff["ELOffsp","SE"], 
+                    Offs_pval = coeff["ELOffsp","pval"], 
+                       Male_eff = coeff["SexMale","Est"], 
+                       Male_sd = coeff["SexMale","SE"], 
+                       Male_pval = coeff["SexMale","pval"],
+                     Educ_eff = coeff["Education","Est"], 
+                     Educ_sd = coeff["Education","SE"], 
+                     Educ_pval = coeff["Education","pval"],
+                       FC.DK_eff = coeff["FC_DKTRUE","Est"], 
+                       FC.DK_sd = coeff["FC_DKTRUE","SE"], 
+                       FC.DK_pval = coeff["FC_DKTRUE","pval"],
+                     PC1_pval = coeff["PC1","pval"], 
+                     PC2_pval = coeff["PC2","pval"], 
+                     PC3_pval = coeff["PC3","pval"], 
+                     PC4_pval = coeff["PC4","pval"],
+                       htn_med_eff = coeff["htn_meds","Est"], 
+                       htn_med_pval = coeff["htn_meds","pval"],
+                       lipid_med_eff = coeff["lipid_meds","Est"], 
+                       lipid_med_pval = coeff["lipid_meds","pval"],
+                      nitro_med_eff = coeff["nitro_meds","Est"], 
+                      nitro_med_pval = coeff["nitro_meds","pval"],
+                        t2d_med_eff = coeff["t2d_meds","Est"], 
+                        t2d_med_pval = coeff["t2d_meds","pval"]))
+}
+
+EL_pval_adj <-  p.adjust(out_dat$EL_pval, method="BH")
+Offs_pval_adj <-  p.adjust(out_dat$Offs_pval, method="BH")
+out_dat1 <- add_column(out_dat, EL_pval_adj, .after = 2)
+out_dat1 <- add_column(out_dat1, Offs_pval_adj, .after = 5)
+out_dat2 <- out_dat1[order(out_dat1$EL_pval), ]
+
+out_dat3 <- left_join(metab.look.up.table, out_dat2, by=c("fake.metab.names" = "metabolite")) %>%
+  mutate(metabolite = orig.metab.names)
+     nsign <- length(which(out_dat3 %>% pull(EL_pval_adj) < 0.05))
+     
+write.csv(out_dat3, "EL_assoc_batch5.pc_genesis.03.30.2023.csv", row.names=F)
+```
+
+#Annotation
+```{r}
+annot.dat <- read.csv(paste0(annot.dir, "llfs.annotation.03.30.2023.csv")) %>%
+  mutate(Compound.Name = Input.name)
+         dim(annot.dat)
+
+sum(out_dat3$metabolite %in% annot.dat$Compound.Name)
+ 
+
+out_dat1_annot <- data.frame(annot.dat, out_dat3[match(annot.dat$Compound.Name, out_dat3$metabolite),]) 
+out_dat1_annot <- out_dat1_annot[order(out_dat1_annot$EL_pval), ]
+
+write.csv(out_dat1_annot, "annotated_EL_assoc_batch5.pc_genesis.03.30.2023.csv")
+```
+
+# Plot
+```{r}
+metab <- as.character(out_dat3$fake.metab.names[1:nsign])
+true.name <- as.character(out_dat3$orig.metab.names[1:nsign])
+for(i in 1:nsign){
+  png(paste0("plot_dir/", true.name[i], ".png"))
+  print(ggplot(analysis.final.no.missing.dat, 
+               aes(EL,  analysis.final.no.missing.dat%>%pull(metab[i]))) + 
+          geom_boxplot(size=1) +
+          theme_bw() +
+          ylab(true.name[i]))
+  dev.off()
+}
+```
+
+## some examples
+
+```{r }
+
+kynurenine <- analysis.final.no.missing.dat$metab81
+tryptophan <- analysis.final.no.missing.dat$metab26
+tryptophan.betaine <- analysis.final.no.missing.dat$metab67
+N.ACETYLTRYPTOPHAN <- analysis.final.no.missing.dat$metab11
+Ergothioneine <- analysis.final.no.missing.dat$metab40
+THREITOL <- analysis.final.no.missing.dat$metab186
+PROLINE <- analysis.final.no.missing.dat$metab72
+PROLINE <- analysis.final.no.missing.dat$metab72
+Glycocholic.acid <- analysis.final.no.missing.dat$metab220
+
+analysis.final.no.missing.dat$EL <- relevel(analysis.final.no.missing.dat$EL, ref="EL")
+data.plot <- data.frame(Age.e=analysis.final.no.missing.dat$EL, 
+                        kynurenine, tryptophan, tryptophan.betaine, N.ACETYLTRYPTOPHAN, Ergothioneine,
+                        THREITOL, PROLINE, Glycocholic.acid) %>%
+      mutate(K2T = kynurenine-tryptophan)
+
+
+  ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=kynurenine))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Kynurenine)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+
+ ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=K2T))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(K2T)")+
+theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+
+  
+  ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=tryptophan))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Tryptophan)")+
+theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+  
+   ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=tryptophan.betaine))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(tryptophan.betaine)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+
+         ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=N.ACETYLTRYPTOPHAN))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(N.ACETYLTRYPTOPHAN)")+
+theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+ 
+      ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=Ergothioneine))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Ergothioneine)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+      
+       ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=THREITOL))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Threitol)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+ 
+ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=PROLINE))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Proline)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+ 
+ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=Glycocholic.acid))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Glycocholic acid)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+ 
+ggplot2::ggplot(data=data.plot, aes(x=Age.e, y=THREITOL))+
+    geom_boxplot(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab("log(Threitol)")+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=0.0),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+
+```
