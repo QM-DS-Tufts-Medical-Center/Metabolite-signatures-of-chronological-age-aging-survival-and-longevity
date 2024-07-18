@@ -1,0 +1,540 @@
+---
+title: "Metabolomic aging clock"
+author: "Anastasia Leshchyk, Paola Sebastiani"
+date: "2024-06-13"
+output: html_document
+---
+
+```{r include= FALSE}
+library(gee)
+library(Metrics)
+library(ggplot2)
+library(glmnet)
+library(caret)
+library(dplyr)
+library(Biobase)
+library(survival)
+library(reshape)
+library(moments)
+library(survminer)
+library(patchwork)
+
+# reading files
+dir<- "/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/ana_analysis/metabolomics_aging_clocks/data/"
+metab.look.up.table.batch4<-  read.csv(paste0(dir, "batch4_metab_look_up_table.csv"))
+analysis.final.no.missing.dat.batch4 <- read.csv(paste0(dir, "batch4_log_metab.csv"))
+metab.look.up.table.batch5<- read.csv(paste0(dir,"batch5_metab_look_up_table.csv"))
+analysis.final.no.missing.dat.batch5<- read.csv(paste0(dir,"batch5_log_metab.csv"))
+necs_metabolomics<- read.csv("/restricted/projectnb/necs/paola_analysis/metabolomics/necs_pilot/analysis/data.set.clean.csv")
+metab.look.up.table.batch6<- read.csv(paste0(dir,"batch6_metab_look_up_table.csv"))
+analysis.final.no.missing.dat.batch6<- read.csv(paste0(dir,"batch6_log_metab.csv"))
+analysis.final.no.missing.dat.batch5.visit2<- read.csv(paste0(dir, "batch5_log_metab_visit2_updated.csv"))
+analysis.final.no.missing.dat.batch5.visit1<- read.csv(paste0(dir, "batch5_log_metab_visit1_updated.csv"))
+```
+
+```{r include = FALSE}
+
+
+# functions
+getTTResiduals <- function(MResidualss) {
+  names <- names(MResidualss)
+  res_out <- c()
+  
+  transformed_strings <- unique(sub("\\.\\d+$", "", names))
+  
+  for (id in transformed_strings) {
+    pattern <- paste0("^", id, "(\\.\\d+)?$")
+    X_columns <-
+      MResidualss[grep(pattern, names(MResidualss), value = TRUE)]
+    X_average <- median(X_columns)
+    
+    res_out <- rbind(res_out, data.frame(id = id,
+                                         residual = X_average))
+  }
+  return (res_out)
+}
+
+```
+
+```{r include = FALSE}
+batch5scaled <- analysis.final.no.missing.dat.batch5
+# scale the metabolites
+batch5scaled[1:220] <-
+  scale(batch5scaled[1:220], center = TRUE, scale = TRUE)
+hist(batch5scaled$metab1)
+
+colnames(batch5scaled) <-
+  c(
+    metab.look.up.table.batch5$orig.metab.names,
+    "subject",
+    "Age.e",
+    "Sex",
+    "Education",
+    "FC_DK",
+    "PC1",
+    "PC2",
+    "PC3",
+    "PC4",
+    "htn_meds",
+    "lipid_meds",
+    "nitro_meds",
+    "t2d_meds",
+    "pedid",
+    "BirthYear",
+    "Alive",
+    "Age"
+  )
+
+
+batch4scaled <- analysis.final.no.missing.dat.batch4
+# scale the metabolites
+batch4scaled[1:188] <-
+  scale(batch4scaled[1:188], center = TRUE, scale = TRUE)
+
+hist(batch4scaled$metab1)
+
+colnames(batch4scaled) <-
+  c(
+    metab.look.up.table.batch4$orig.metab.names,
+    "subject","Age.e","Sex","Education","FC_DK","PC1","PC2","PC3","PC4","htn_meds","lipid_meds","nitro_meds","t2d_meds","pedid","BirthYear","Alive","Age")
+
+varToRemove <-
+  c(
+    "pedid","Age","Age.e","Sex","BirthYear","Alive","Education","FC_DK","PC1","PC2","PC3","PC4","htn_meds","lipid_meds","nitro_meds","t2d_meds"
+  )
+
+metabolite_dat <-
+  merge(batch4scaled, batch5scaled[, !colnames(batch5scaled) %in% varToRemove], by = "subject")
+
+```
+
+```{r include = FALSE}
+batch5scaled_v2 <- analysis.final.no.missing.dat.batch5.visit2
+# scale the metabolites
+batch5scaled_v2[1:220] <-
+  scale(batch5scaled_v2[1:220], center = TRUE, scale = TRUE)
+hist(batch5scaled_v2$metab1)
+
+colnames(batch5scaled_v2)<- c(metab.look.up.table.batch5$orig.metab.names, "subject", "Age.e" , "visitcode.x",   "Age.e.updated", "Sex", "Education", "FC_DK", "PC1", "PC2", "PC3", "PC4", "pedid", "BirthYear", "Alive", "Age")
+
+batch4scaled_v2 <- analysis.final.no.missing.dat.batch6
+# scale the metabolites
+batch4scaled_v2[1:188] <-
+  scale(batch4scaled_v2[1:188], center = TRUE, scale = TRUE)
+
+hist(batch4scaled_v2$metab1)
+
+colnames(batch4scaled_v2)<- c(metab.look.up.table.batch4$orig.metab.names, "subject",  "visitcode.x",  "Age.e.updated", "Sex", "Education", "FC_DK", "PC1", "PC2", "PC3", "PC4", "htn_meds", "lipid_meds", "nitro_meds", "t2d_meds", "pedid", "BirthYear", "Alive", "Age")
+
+
+varToRemove <-
+    c("pedid","Age","Age.e","Sex","Age.e.updated","BirthYear","visitcode.x","Alive", "Education", "FC_DK", "PC1", "PC2", "PC3", "PC4", "htn_meds", "lipid_meds", "nitro_meds", "t2d_meds")
+
+metabolite_dat_v2<- merge(batch4scaled_v2, batch5scaled_v2[,!colnames(batch5scaled_v2) %in% varToRemove], by = "subject")
+```
+
+
+## Lipids and Polar Metabolites Aging Clock, LLFS Visit 1: 
+
+```{r include= FALSE}
+library("xlsx")
+# reading the list of metabolites associated with age
+resultsPaper<- read.xlsx("/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/ana_analysis/metabolomics_aging_clocks/data/TableS1a_All_results_03.24.2024.xlsx", "all results", header=TRUE, colClasses=NA)
+# finding them in the LLFS data set
+metaboliteAge<- metabolite_dat[, colnames(metabolite_dat) %in% c(resultsPaper[resultsPaper$age.fdr.05==TRUE,]$Compound.Name, varToRemove)]
+```
+
+
+```{r include = FALSE}
+# run elastic net only with the metabolites associated with Age
+rownames(metaboliteAge)<- 1:nrow(metaboliteAge)
+  
+  varToRemove <-
+    c("pedid","Age","Age.e","BirthYear","Alive","subject")
+  set.seed(12345)
+
+```
+
+
+```{r include= TRUE}
+# Set the training data size proportion
+trainSize = 0.8
+
+# Split the data into training and testing sets
+ind <- sample(2, nrow(metaboliteAge), replace = TRUE, prob = c(trainSize, (1 - trainSize)))
+train <- metaboliteAge[ind == 1, ]
+test <- metaboliteAge[ind == 2, ]
+
+# Prepare training data by removing unwanted variables
+xTrain <- train[, !colnames(metaboliteAge) %in% varToRemove]
+yTrain <- train[["Age.e"]]
+
+# Prepare testing data by removing unwanted variables
+xTest <- test[, !colnames(metaboliteAge) %in% varToRemove]
+yTest <- test[["Age.e"]]
+
+# Set up the control parameters for cross-validation
+control <- trainControl(
+  method = "CV",
+  number = 5,
+  search = "random",
+  verboseIter = TRUE
+)
+
+# Train the elastic net model
+garbage <- capture.output(
+  elasticModel <- caret::train(
+    yTrain ~ .,
+    data = cbind(xTrain, yTrain),
+    method = "glmnet",
+    TRACE = FALSE,
+    trControl = control,
+    na.action = na.omit
+  )
+)
+
+# Predict the age in the test set
+AgePredicted <- predict(elasticModel, xTest)
+
+# Regress the predicted age on the chronological age
+modelAge <- glm(AgePredicted ~ yTest)
+summary(modelAge)
+
+# Get the intercept and slope for further clock correction
+Intercept <- modelAge$coefficients[1]
+Slope <- modelAge$coefficients[2]
+
+# Correct the predicted age
+AgePredicted <- (AgePredicted - Intercept) / Slope
+
+# Create a data frame for plotting
+plDf <- data.frame(ChronologicalAge = yTest, MetabolomicAge = AgePredicted)
+
+# Plot the chronological age vs predicted metabolomic age in the test set
+g0 <- ggplot2::ggplot(plDf, aes(x = ChronologicalAge, y = MetabolomicAge)) +
+  geom_point() +
+  geom_abline(show.legend = TRUE) +
+  theme(axis.text = element_text(size = 20),
+        axis.title = element_text(size = 20, face = "bold")) +
+  labs(x = "Chronological age", y = "Metabolomic age")
+print(g0)
+
+# Create a data frame for residuals (age acceleration)
+resid <- data.frame(
+  ChronologicalAge = yTest,
+  AgeAcceleration = (AgePredicted - yTest)
+)
+
+# Plot the chronological age vs age acceleration (residuals)
+g1 <- ggplot2::ggplot(resid, aes(x = ChronologicalAge, y = AgeAcceleration)) +
+  geom_point() +
+  geom_hline(yintercept = 0) +
+  theme(axis.text = element_text(size = 20),
+        axis.title = element_text(size = 20, face = "bold")) +
+  labs(x = "Chronological age", y = "Age acceleration")
+print(g1)
+
+# Calculate Mean Absolute Error (MAE) for chronological vs predicted age
+MAE <- mae(yTest, AgePredicted)
+
+# Calculate correlation for chronological vs predicted age
+CorComp <- cor(yTest, AgePredicted)
+
+# Fit a model to check for bias
+modelBias <- glm(AgeAcceleration ~ ChronologicalAge, data = resid, family = gaussian())
+res <- summary(modelBias)
+betaCoeffInt <- res$coefficients[1]
+betaCoeffAge <- res$coefficients[2]
+pvalueInt <- res$coefficients[1, 4]
+pvalueAge <- res$coefficients[2, 4]
+
+# Predict age in the full LLFS data set
+AgePredicted <- predict(elasticModel, metaboliteAge[, !colnames(metaboliteAge) %in% varToRemove])
+
+# Calculate MAE for chronological vs predicted age before correction
+MAEbeforeCorrection <- MAE(AgePredicted, metaboliteAge$Age.e)
+
+# Calculate correlation for chronological vs predicted age before correction
+CorBeforeCorrection <- cor(AgePredicted, metaboliteAge$Age.e)
+
+# Regress the predicted age on the chronological age
+modelBias2 <- glm(AgePredicted ~ metaboliteAge$Age.e)
+summary(modelBias2)
+
+# Get the coefficients for further clock correction
+Intercept <- modelBias2$coefficients[1]
+Slope <- modelBias2$coefficients[2]
+
+# Correct the predicted age
+AgePredicted <- (AgePredicted - Intercept) / Slope
+
+# Compute the age acceleration
+AgeAcceleration <- AgePredicted - metaboliteAge$Age.e
+Age.e <- metaboliteAge$Age.e
+YOE <- metaboliteAge$Education
+Sex <- metaboliteAge$Sex
+
+# Create a data frame for plotting
+plDF <- as.data.frame(cbind(Age.e, AgePredicted, AgeAcceleration))
+
+# Plot the chronological age vs corrected predicted age
+g0 <- ggplot2::ggplot(plDF, aes(x = Age.e, y = AgePredicted)) +
+  geom_point() +
+  geom_abline(show.legend = TRUE) +
+  theme(axis.text = element_text(size = 20, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 20, face = "bold")) +
+  labs(x = "Chronological age", y = "Metabolomic age")
+print(g0)
+
+# Plot the chronological age vs age acceleration
+g1 <- ggplot2::ggplot(plDF, aes(x = AgePredicted, y = AgeAcceleration)) +
+  geom_point() +
+  theme(axis.text = element_text(size = 20, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 20, face = "bold")) +
+  labs(x = "Metabolomic age", y = "Age acceleration")
+print(g1)
+
+```
+
+```{r include = FALSE}
+# define some covariates
+Status <- rep(0, nrow(metaboliteAge))
+Status[metaboliteAge$Alive == "No"] <- 1
+FollowUpAge <-metaboliteAge$Age - metaboliteAge$Age.e
+Deceased <- ifelse(Status == 0, "No", "Yes")
+sex <- metaboliteAge$Sex
+
+# stratify age 
+   metaboliteAge[metaboliteAge$Age.e <= 40, "Age_group"] <- "30-40"
+    metaboliteAge[metaboliteAge$Age.e > 40 & metaboliteAge$Age.e <= 50, "Age_group"] <- "40-50"
+    metaboliteAge[metaboliteAge$Age.e > 50 & metaboliteAge$Age.e <= 60, "Age_group"] <- "50-60"
+    metaboliteAge[metaboliteAge$Age.e > 60 & metaboliteAge$Age.e <= 70, "Age_group"] <- "60-70"
+    metaboliteAge[metaboliteAge$Age.e > 70 & metaboliteAge$Age.e <= 80, "Age_group"] <- "70-80"
+    metaboliteAge[metaboliteAge$Age.e > 80 & metaboliteAge$Age.e <= 90, "Age_group"] <- "80-90"
+    metaboliteAge[metaboliteAge$Age.e > 90, "Age_group"] <- "90-100"
+    
+    AgeGroup <- metaboliteAge$Age_group
+    ```
+
+ 
+```{r include = TRUE}
+# Perform survival analysis using Cox proportional hazards model
+coxModel <- coxph(
+  Surv(FollowUpAge, Status) ~ strata(AgeGroup) + AgeAcceleration + YOE + sex
+)
+
+# Print the results of the test for proportional hazards assumption
+print(cox.zph(coxModel))
+
+# Summarize the Cox model
+coxSummary <- summary(coxModel)
+print(coxSummary)
+
+# Get Martingale residuals
+MResiduals <- getTTResiduals(residuals(coxModel, type = "martingale"))
+
+# Create a data frame for residuals and additional variables
+residCox <- data.frame(
+  id = rownames(metaboliteAge),
+  AgeAcceleration = AgeAcceleration,
+  Deceased = Deceased,
+  ChronologicalAge = Age.e
+)
+
+# Merge residuals data frame with Martingale residuals
+residCox <- merge(residCox, MResiduals, by = "id")
+residCox <- residCox %>% dplyr::rename("MResiduals" = "residual")
+
+# Stratify AgeAcceleration into groups
+residCox[residCox$AgeAcceleration <= -15, "delta.AgeGroup"] <- "<=-15"
+residCox[residCox$AgeAcceleration > -15 & residCox$AgeAcceleration <= -10, "delta.AgeGroup"] <- "]-15;-10]"
+residCox[residCox$AgeAcceleration > -10 & residCox$AgeAcceleration <= -5, "delta.AgeGroup"] <- "]-10;-5]"
+residCox[residCox$AgeAcceleration > -5 & residCox$AgeAcceleration <= 0, "delta.AgeGroup"] <- "]-5; 0]"
+residCox[residCox$AgeAcceleration > 0 & residCox$AgeAcceleration <= 5, "delta.AgeGroup"] <- "]0;5]"
+residCox[residCox$AgeAcceleration > 5 & residCox$AgeAcceleration <= 10, "delta.AgeGroup"] <- "]5;10]"
+residCox[residCox$AgeAcceleration > 10 & residCox$AgeAcceleration <= 15, "delta.AgeGroup"] <- "]10;15]"
+residCox[residCox$AgeAcceleration > 15, "delta.AgeGroup"] <- ">15"
+
+# Convert delta.AgeGroup to a factor with ordered levels
+residCox$delta.AgeGroup <- factor(residCox$delta.AgeGroup, levels = c("<=-15", "]-15;-10]", "]-10;-5]", "]-5; 0]", "]0;5]", "]5;10]", "]10;15]", ">15"))
+
+# Plot Martingale residuals by AgeAcceleration groups
+g2.3 <- ggplot2::ggplot(residCox, aes(x = delta.AgeGroup, y = MResiduals)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0) +
+  theme(axis.text = element_text(size = 15, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 15, face = "bold")) +
+  labs(
+    x = "Δ Age (in years)",
+    y = "Martingale Residuals",
+    title = "All subjects"
+  ) +
+  theme(legend.text = element_text(size = 15), legend.title = element_text(size = 15))
+print(g2.3)
+
+# Export some metrics
+out_dat <- data.frame(
+  MAE_before_correction = MAEbeforeCorrection,
+  Cor_before_correction = CorBeforeCorrection,
+  MAE = MAE,
+  Cor = CorComp,
+  BetaInt = betaCoeffInt,
+  pvalueInt = pvalueInt,
+  betaCoeffAge = betaCoeffAge,
+  pvalueAge = pvalueAge
+)
+
+# Return a list with output data and other relevant metrics
+returnList <- list(
+  out_dat = out_dat,
+  AgeAcceleration = AgeAcceleration,
+  AgePredicted = AgePredicted,
+  Intercept = Intercept,
+  Slope = Slope
+)
+
+# Print the exported metrics
+print(returnList$out_dat)
+
+```
+
+
+```{r include = FALSE}
+# Extracting, correcting the coefficients from the elastic net model
+coeffSummary<- coef(elasticModel$finalModel, elasticModel$bestTune$lambda)
+coefDat<- data.frame(colnameStr = coeffSummary[,1])
+
+elsticCoeff<- data.frame(metab = rownames(coefDat), coeff =  coefDat$colnameStr)
+datToexport <- elsticCoeff[elsticCoeff$coeff != 0,]
+# removing ` from the colnames
+datToexport$metab<- gsub("`", "", datToexport$metab)
+
+# Correcting the coefficients
+datToexport[datToexport$metab == "(Intercept)",]$coeff = (datToexport[datToexport$metab == "(Intercept)",]$coeff - returnList$Intercept)/returnList$Slope
+datToexport[datToexport$metab != "(Intercept)",]$coeff<- datToexport[datToexport$metab != "(Intercept)",]$coeff/returnList$Slope
+
+# Caving them to a file
+#write.csv(datToexport, "Clock#sElasticNetCoeff_corrected.csv", row.names = FALSE)
+```
+
+## Application of the clock using LLFS data from Visit 2
+
+```{r include= FALSE}
+# re-coding some of the variables
+metabolite_dat_v2$FC_DK<- ifelse(metabolite_dat_v2$FC_DK == TRUE, 1, 0)
+metabolite_dat_v2$Sex<- ifelse(metabolite_dat_v2$Sex == "Male", 1, 0)
+# multiplying the coefficients 
+metabolite_ageSign<- metabolite_dat_v2[, colnames(metabolite_dat_v2) %in% c(resultsPaper[resultsPaper$age.fdr.05==TRUE,]$Compound.Name, varToRemove)]
+
+FC_DK <- datToexport[datToexport$metab == "FC_DKTRUE",]$coeff
+htn_meds<- datToexport[datToexport$metab == "htn_meds",]$coeff
+Intercept = datToexport[datToexport$metab == "(Intercept)",]$coeff
+Sex = datToexport[datToexport$metab == "SexMale",]$coeff
+
+varNames = datToexport$metab[!datToexport$metab %in% c("(Intercept)", "SexMale", "FC_DKTRUE")]
+coeffValues = datToexport[datToexport$metab %in% varNames,]$coeff
+
+```
+
+```{r warning=FALSE}
+# Predict age in Visit 2 using the clock built with Visit 1 data
+AgePredicted_v2 <- Intercept + as.matrix(metabolite_dat_v2[colnames(metabolite_dat_v2) %in% varNames]) %*% as.vector(coeffValues) + Sex * metabolite_dat_v2$Sex + FC_DK * metabolite_dat_v2$FC_DK
+
+# Add predicted age from Visit 1 and Visit 2 to the respective datasets
+metabolite_dat$AgePredicted <- returnList$AgePredicted
+metabolite_dat_v2$AgePredicted_v2 <- AgePredicted_v2
+
+# Calculate age acceleration for Visit 2
+metabolite_dat_v2$AgeAcceleration <- metabolite_dat_v2$AgePredicted_v2 - metabolite_dat_v2$Age.e.updated
+
+# Find overlapping subjects between two visits
+overlapSubjects <- merge(metabolite_dat, metabolite_dat_v2, by = "subject")
+overlapSubjects$Delta_Age <- overlapSubjects$Age.e.updated - overlapSubjects$Age.e
+overlapSubjects$Delta_Age_predicted <- overlapSubjects$AgePredicted_v2 - overlapSubjects$AgePredicted
+
+# Define common limits and breaks for the plots
+x_breaks <- c(30, 40, 50, 60, 70, 80, 90, 100, 110)
+y_breaks <- c(30, 40, 50, 60, 70, 80, 90, 100, 110, 120)
+x_limits <- c(30, 110)
+y_limits <- c(30, 120)
+
+# Plot the predicted age versus the chronological age in Visit 1 data
+g1 <- ggplot2::ggplot(overlapSubjects, aes(x = Age.e, y = AgePredicted)) +
+  geom_point() +
+  geom_abline(show.legend = TRUE) +
+  theme(axis.text = element_text(size = 15, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 15, face = "bold")) +
+  scale_y_continuous(breaks = y_breaks, limits = y_limits) +
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  labs(
+    x = "Chronological age",
+    y = "Metabolomic age",
+    title = "Visit 1"
+  )
+
+# Plot the predicted age versus the chronological age in Visit 2 data
+g2 <- ggplot2::ggplot(overlapSubjects, aes(x = Age.e.updated, y = AgePredicted_v2)) +
+  geom_point() +
+  geom_abline(show.legend = TRUE) +
+  theme(axis.text = element_text(size = 15, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 15, face = "bold")) +
+  scale_y_continuous(breaks = y_breaks, limits = y_limits) +
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  labs(
+    x = "Chronological age",
+    y = "Metabolomic age",
+    title = "Visit 2"
+  )
+
+# Display the Visit 1 plot
+print(g1)
+
+# Calculate MAE and correlation for the predicted age versus chronological age in Visit 1 data
+MAE_v1 <- MAE(overlapSubjects$Age.e, overlapSubjects$AgePredicted)
+cor_v1 <- cor(overlapSubjects$Age.e, overlapSubjects$AgePredicted)
+
+# Display the Visit 2 plot
+print(g2)
+
+# Calculate MAE and correlation for the predicted age versus chronological age in Visit 2 data
+MAE_v2 <- MAE(overlapSubjects$Age.e.updated, overlapSubjects$AgePredicted_v2)
+cor_v2 <- cor(overlapSubjects$Age.e.updated, overlapSubjects$AgePredicted_v2)
+
+# Print the MAE and correlation values for both visits
+print(paste("Visit 1 - MAE:", MAE_v1, "Correlation:", cor_v1))
+print(paste("Visit 2 - MAE:", MAE_v2, "Correlation:", cor_v2))
+
+```
+
+
+```{r warning=FALSE}
+g3<- ggplot2::ggplot(overlapSubjects, aes(x = Age.e.updated, y = AgePredicted_v2)) +
+  geom_point() +
+  geom_abline(show.legend = TRUE) +
+  theme(axis.text = element_text(size = 15, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 15, face = "bold")) +  # Tilt x-axis labels
+  scale_y_continuous(breaks = y_breaks, limits = y_limits) +
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  labs(
+    x = "Chronological age",
+    y = "Metabolomic age",
+    title = "Visit 2"
+  )
+
+g1+g3
+
+# plotting the chronological age versus age acceleration in visit 2
+g4<- ggplot2::ggplot(metabolite_dat_v2, aes(x = Age.e.updated, y = AgeAcceleration)) +
+  geom_point() +
+  theme(axis.text = element_text(size = 15, color = "#993333", face = "bold"),
+        axis.title = element_text(size = 15, face = "bold"),) +  # Tilt x-axis labels
+  labs(
+    x = "Chronological age",
+    y = "Age acceleration",
+    title = "Visit 2"
+  )
+
+g4
+```
+
+
