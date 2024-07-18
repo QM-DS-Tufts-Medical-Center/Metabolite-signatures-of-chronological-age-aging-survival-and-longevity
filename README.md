@@ -7,7 +7,7 @@ We include 2  Rmarkdown files per analysis:
 
            lipid analysis: Metabolite.batch4_age_assoc_no_EL_final.Rmd 
            
-           polar metabolites analysis: are in two separate analysis scripts]
+           polar metabolites analysis: Metabolite.batch5_age_assoc_no_EL_final.Rmd]
 
 2- metabolites associated with extreme longevity [lipid and polar metabolites are in two separate analysis scripts]
 
