@@ -1,0 +1,300 @@
+---
+title: "Age signature - batch 4 = lipid data"
+author: "Zeyuan Song & Paola Sebastiani"
+date: "May 2024"
+output:
+  html_document:
+    theme: united
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_collapse: false
+---
+
+# Initialize paths
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+setwd("where you work")
+dir() 
+llfs.pheno.dir <-  where phenotypic data is
+llfs.metab4.dir <- where lipidomic data is
+annot.dir <- where annotation file is
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(Heatplus)
+library(tidyverse)
+library(coxme)
+library(GENESIS)
+suppressPackageStartupMessages(library(SeqArray))
+suppressPackageStartupMessages(library(SeqVarTools))
+library(Biobase)
+library(lubridate)
+library(geepack)
+```
+
+# Read data and basic QC
+# Read LLFS list forbatch 4
+# use fake names of metabolites for analysis and annotate at the end
+# use data in the long format and analyze using GEE
+```{r }
+llfs.data.batch4 <- read.csv(paste0(llfs.pheno.dir,  "pheno.file"), 
+                             header=T, na.strings = c("", NA), check.names=F) %>%
+       # generate age at blood.2
+  mutate(Age.blood.2 = year(dmy(date.blood))-BirthYear) %>% 
+  mutate( delta.t = Age.blood.2-Age.e) 
+
+   dim(llfs.data.batch4)
+    met.4.llfs <- readr::read_csv(paste0(llfs.metab4.dir, "lipids_normalized"))  %>%
+   mutate( fake.subject = paste(subject, visitcode, sep="_"), .after = visitcode) 
+
+     n.metab <- ncol(met.4.llfs)-3
+     orig.metab.names <- names(met.4.llfs)[4:ncol(met.4.llfs)]
+     fake.metab.names <- paste0("metab", c(1:n.metab))
+     metab.look.up.table <- data.frame( orig.metab.names, fake.metab.names)
+     names(met.4.llfs)[4:ncol(met.4.llfs)] <- fake.metab.names
+      metab.look.up.table$orig.metab.names <- str_replace_all(metab.look.up.table$orig.metab.names,
+                                                               "dCer_NS", "Cer")
+```
+
+# Data  formatting--  
+```{r }
+met.llfs <- met.4.llfs
+dim(met.llfs)
+ table(met.llfs$visitcode)
+ 
+# extract patients data at visiti 1 or enrolled at visit 2
+ met.llfs.vst1 <- met.llfs %>%
+  filter(visitcode==1 | visitcode==4)
+met.data.1 <- as.data.frame(t(met.llfs.vst1[ , 4:ncol(met.llfs.vst1)]))
+dim(met.data.1)
+colnames(met.data.1) <- met.llfs.vst1$subject
+
+# extract patients data at visit2  
+met.llfs.vst2 <- met.llfs %>%
+  filter(visitcode==3)
+met.data.2 <- as.data.frame(t(met.llfs.vst2[ , 4:ncol(met.llfs.vst2)]))
+dim(met.data.2)
+colnames(met.data.2) <- met.llfs.vst2$subject
+
+common.id <- intersect(met.llfs.vst1$subject, met.llfs.vst2$subject)
+common.metab <- intersect(row.names(met.data.1), row.names(met.data.2)) 
+  length(common.id)
+  length(common.metab)
+  
+ ## Generate data with visit 1 and 2 metabolomic data
+    met.data.1 <- as.data.frame(met.data.1[ match(common.metab, row.names(met.data.1)), match(as.character(common.id), names(met.data.1) )])
+     names(met.data.1) <- paste0(names(met.data.1), "_1")
+    met.data.2 <- as.data.frame(met.data.2[ match(common.metab, row.names(met.data.2)), match(as.character(common.id), names(met.data.2) )])
+     names(met.data.2) <- paste0(names(met.data.2), "_3")
+     
+     met.data <- cbind(met.data.1, met.data.2)
+
+```
+
+# Data visualization and outlier detection in met.data.1
+```{r }
+met.data.1 <- met.data
+hist(apply(met.data.1,2,min))
+summary(apply(met.data.1,2,min))
+boxplot((met.data.1))
+
+pca.res <- prcomp(log(t(met.data.1)), scale. = T)
+ # summary(pca.res)
+    plot(pca.res$x[,1:2])
+      outliers <- names(which(pca.res$x[,1] >25 ))
+      ok.samples <- setdiff(names(met.data.1), outliers)
+  new.met.data.1 <- met.data.1[ , as.character(ok.samples)]
+
+  pca.res <- prcomp(log(t(new.met.data.1)), scale. = T)
+   ## summary(pca.res)
+    plot(pca.res$x[,1:2])
+  
+  # filter out bad samples  
+     met.data.1 <- data.frame(fake.subject = ok.samples, t(met.data.1[ , ok.samples]))
+   dim(met.data.1)
+      # now drop outliers
+      n.outlier <- c()
+  for(ind.col in 2:ncol(met.data.1)){
+          this.metab <- log(met.data.1[,ind.col])
+           this.mean <- mean(this.metab, na.rm=T)
+           this.var  <- var(this.metab, na.rm=T)
+              set.to.na <- which((this.metab > this.mean+4*sqrt(this.var)) | 
+                               (this.metab < this.mean-4*sqrt(this.var)))
+              met.data.1[set.to.na, ind.col ] <-  exp(this.mean)
+              n.outlier <- c(n.outlier, length(set.to.na))
+    }
+    summary(n.outlier)
+    hist(n.outlier)
+
+# Order by ID  
+    met.data.1 <- met.data.1[order(met.data.1$fake.subject),]
+ 
+ 
+```
+
+
+# generate analysis data set
+```{r}
+ analysis.master.dat <- met.data.1 %>%
+    left_join( llfs.data.batch4, by = c("fake.subject"))
+           dim(analysis.master.dat)
+  ## correct delta age for long format analysis
+           analysis.master.dat$delta.t[analysis.master.dat$visitcode == 1] <- 0
+ 
+```
+
+# pca and grm
+```{r}
+pc.df <- read.csv(PCA data file here)
+
+grm <- readRDS(GRM file here)
+
+analysis.dat <- left_join(analysis.master.dat, pc.df, by=c("subject"="sample.id"))
+
+ggplot(analysis.dat, aes(PC1, PC2)) + geom_point()
+ggplot(analysis.dat, aes(PC3, PC4)) + geom_point()
+
+```
+
+# association
+```{r}
+library(gee)
+ analysis.final.dat <- analysis.dat %>%
+   mutate(FC_DK = FC == "DK") %>%
+   select( row.names(met.data), fake.subject, subject, visitcode,
+            Age.e, delta.t, Sex, Education, FC_DK, PC1, PC2, PC3, PC4,
+         htn_meds, lipid_meds, nitro_meds, t2d_meds)
+dim(analysis.final.dat)
+ 
+
+var.list <- c("Age.e", "delta.t",
+              "Education","Sex","FC_DK","PC1","PC2","PC3","PC4","htn_meds","lipid_meds","nitro_meds","t2d_meds")
+summary(analysis.final.dat[,var.list])
+
+analysis.final.no.missing.dat <- na.omit(analysis.final.dat)
+dim(analysis.final.no.missing.dat)
+ 
+
+analysis.final.no.missing.dat[,row.names(met.data)] <- log(analysis.final.no.missing.dat[,row.names(met.data)])
+write.csv(analysis.final.no.missing.dat, "analysis.final.no.missing.dat.batch4.csv")
+
+out_dat <- c(); j <-0
+for(i in row.names(met.data)){
+   j <- j+1
+   analysis.final.no.missing.dat$outcome <- analysis.final.no.missing.dat[,i]
+   mod <- gee(outcome ~ delta.t+Age.e+Sex+Education+FC_DK+PC1+PC2+PC3+PC4+
+                                 htn_meds+lipid_meds+nitro_meds+t2d_meds,
+                     id = subject,
+                      corstr = "exchangeable", data=analysis.final.no.missing.dat)
+
+  coeff <- as.data.frame(summary(mod)$coeff)
+  coeff$pval <- 2*(1-pnorm(abs(coeff[, "Robust z"])))
+  out_dat <- rbind(out_dat, data.frame(metabolite = row.names(met.data)[j], 
+                     time_eff = coeff["delta.t","Estimate"], 
+                     time_sd = coeff["delta.t","Robust S.E."], 
+                     time_pval = coeff["delta.t","pval"], 
+                      Age_eff = coeff["Age.e","Estimate"], 
+                     Age_sd = coeff["Age.e","Robust S.E."], 
+                     Age_pval = coeff["Age.e","pval"], 
+                        Male_eff = coeff["SexMale","Estimate"], 
+                       Male_sd = coeff["SexMale","Robust S.E."], 
+                       Male_pval = coeff["SexMale","pval"],
+                     Educ_eff = coeff["Education","Estimate"], 
+                     Educ_sd = coeff["Education","Robust S.E."], 
+                     Educ_pval = coeff["Education","pval"],
+                       FC.DK_eff = coeff["FC_DKTRUE","Estimate"], 
+                       FC.DK_sd = coeff["FC_DKTRUE","Robust S.E."], 
+                       FC.DK_pval = coeff["FC_DKTRUE","pval"],
+                     PC1_pval = coeff["PC1","pval"], 
+                     PC2_pval = coeff["PC2","pval"], 
+                     PC3_pval = coeff["PC3","pval"], 
+                     PC4_pval = coeff["PC4","pval"],
+                       htn_med_eff = coeff["htn_meds","Estimate"], 
+                       htn_med_pval = coeff["htn_meds","pval"],
+                       lipid_med_eff = coeff["lipid_meds","Estimate"], 
+                       lipid_med_pval = coeff["lipid_meds","pval"],
+                      nitro_med_eff = coeff["nitro_meds","Estimate"], 
+                      nitro_med_pval = coeff["nitro_meds","pval"],
+                        t2d_med_eff = coeff["t2d_meds","Estimate"], 
+                        t2d_med_pval = coeff["t2d_meds","pval"]))
+}
+
+time_pval_adj <-  p.adjust(out_dat$time_pval, method="BH")
+out_dat1 <- add_column(out_dat, time_pval_adj, .after = 2)
+out_dat2 <- out_dat1[order(out_dat1$time_pval), ]
+
+out_dat3 <- left_join(metab.look.up.table, out_dat2, by=c("fake.metab.names" = "metabolite")) %>%
+  mutate(metabolite = orig.metab.names)
+  out_dat3 <- out_dat3[order(out_dat3$time_pval), ]
+  
+write.csv(out_dat3, "Age_rel.change.assoc_batch4.pc_gee.06.22.2024.csv", row.names=F)
+```
+
+#Annotation
+```{r}
+annot.dat <- read.csv(paste0(annot.dir, "llfs.annotation.03.30.2023.csv")) %>%
+  mutate(Compound.Name = Input.name)
+
+sum(out_dat3$metabolite %in% annot.dat$Compound.Name)
+#188
+
+out_dat1_annot <- data.frame(annot.dat, out_dat3[match(annot.dat$Compound.Name, out_dat3$metabolite),])
+out_dat1_annot <- out_dat1_annot[order(out_dat1_annot$Age_pval), ]
+
+write.csv(out_dat1_annot, "annotated_Age_rel.change_assoc_batch4.pc_gee.06.22.2024.csv")
+```
+
+# Plot
+```{r}
+metab <- as.character(out_dat3$fake.metab.names[1:100])
+true.name <- as.character(out_dat3$metabolite[1:100])
+for(i in 1:30){
+   plot.data  <- analysis.final.no.missing.dat %>%
+     select( c("subject", metab=metab[i], "Age.e", "delta.t","visitcode")) %>%
+       mutate( Age.p = Age.e+delta.t)
+       
+    png(paste0("plot_dir/", metab[i], "_lines.png"))
+  print(ggplot(plot.data, aes(x=Age.p, y=metab, group=subject)) + 
+          geom_line() +
+          theme_bw() +
+          ylab(true.name[i]))
+  dev.off()
+
+    
+}
+```
+#Plot for paper
+```{r }
+analysis.final.no.missing.dat <- read.csv("analysis.final.no.missing.dat.batch4.csv", header=T)
+ 
+plot(analysis.final.no.missing.dat$Age.e, analysis.final.no.missing.dat$metab53)
+
+
+TG51.2 <- analysis.final.no.missing.dat$metab172
+TG49.2 <- analysis.final.no.missing.dat$metab169
+TG49.3 <- analysis.final.no.missing.dat$metab137
+PC38.7 <- analysis.final.no.missing.dat$metab83
+
+plot.data  <- analysis.final.no.missing.dat %>%
+     select( c("subject", "Age.e", "delta.t","visitcode")) %>%
+       mutate( Age.p = Age.e+delta.t)
+ data.plot <- data.frame(plot.data,  
+                        TG51.2, TG49.2, TG49.3, PC38.7)  
+for(i in 6:9){
+
+   p<- ggplot2::ggplot(data=data.plot, aes(x=Age.p, y=data.plot%>% pull(i), group=subject))+
+    geom_line(size=1) +
+          theme_bw() +
+             xlab("Age")+ylab(names(data.plot)[i])+
+ theme(axis.text.x = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=+0.5),
+           axis.text.y = element_text(face="bold", color="#993333", 
+                           size=25, angle=0, vjust = 0.25, hjust=-1.0),
+                   text = element_text(family = "Arial", size=25))
+   print(p)
+  }
+   
+```
