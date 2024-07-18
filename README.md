@@ -1,7 +1,7 @@
 # Metabolite-signatures-of-chronological-age-aging-survival-and-longevity
 This repository includes scripts of the analyses included in the manuscript
 
-We include 2 HTML files generated from Rmarkdown that describe the steps of the analysis to identify:
+We include 2  Rmarkdown files per analysis:
 
 1- metabolites associated with chronological age
 
