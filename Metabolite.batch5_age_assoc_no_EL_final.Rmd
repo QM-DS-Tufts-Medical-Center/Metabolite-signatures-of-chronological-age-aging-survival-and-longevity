@@ -17,6 +17,7 @@ setwd("where you work")
 dir() 
 llfs.pheno.dir <-  where phenotypic data is
 llfs.metab5.dir <- where metabolite data is
+annot.dir <- where annotation file is
 library(readxl)
 library(dplyr)
 library(ggplot2)
