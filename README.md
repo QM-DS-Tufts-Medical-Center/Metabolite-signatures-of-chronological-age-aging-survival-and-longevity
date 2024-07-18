@@ -23,9 +23,9 @@ We include 2  Rmarkdown files per analysis:
 
 4- metabolites associated with longitudinal changes
  
-          lipid analysis: 
+          lipid analysis: Metabolite.batch4_age_relative.change_gee.06.14.2024.Rmd
           
-          polar metabolites analysis: 
+          polar metabolites analysis: Metabolite.batch5_age_relative.change_gee.06.14.2024.Rmd
 
 
 
