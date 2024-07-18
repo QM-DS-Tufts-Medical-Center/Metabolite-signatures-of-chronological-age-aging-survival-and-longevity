@@ -11,9 +11,9 @@ We include 2  Rmarkdown files per analysis:
 
 2- metabolites associated with extreme longevity 
 
-          lipid analysis: 
+          lipid analysis: Metabolite.batch4_EL_assoc_final.Rmd
           
-          polar metabolites analysis
+          polar metabolites analysis: Metabolite.batch5_EL_assoc_final.Rmd
           
 3- metabolites associated with mortality risk 
 
