@@ -21,7 +21,7 @@ library(patchwork)
 
 # reading files
 dir<- "data/"
-metab.look.up.table.batch4<-  read.csv(paste0(dir, "batch4_metab_look_up_table.csv"))
+metab.look.up.table.batch4<- read.csv(paste0(dir, "batch4_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch4 <- read.csv(paste0(dir, "batch4_log_metab.csv"))
 metab.look.up.table.batch5<- read.csv(paste0(dir,"batch5_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch5<- read.csv(paste0(dir,"batch5_log_metab.csv"))
