@@ -26,8 +26,8 @@ analysis.final.no.missing.dat.batch4 <- read.csv(paste0(dir, "batch4_log_metab.c
 metab.look.up.table.batch5<- read.csv(paste0(dir,"batch5_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch5<- read.csv(paste0(dir,"batch5_log_metab.csv"))
 necs_metabolomics<- read.csv("data.set.clean.csv")
-metab.look.up.table.batch6<- read.csv(paste0(dir,"batch6_metab_look_up_table.csv"))
-analysis.final.no.missing.dat.batch6<- read.csv(paste0(dir,"batch6_log_metab.csv"))
+metab.look.up.table.batch4.visit2<- read.csv(paste0(dir,"batch4_visit2_metab_look_up_table.csv"))
+analysis.final.no.missing.dat.batch4.visit2<- read.csv(paste0(dir,"batch4_visit2_log_metab.csv"))
 analysis.final.no.missing.dat.batch5.visit2<- read.csv(paste0(dir, "batch5_log_metab_visit2_updated.csv"))
 analysis.final.no.missing.dat.batch5.visit1<- read.csv(paste0(dir, "batch5_log_metab_visit1_updated.csv"))
 ```
@@ -115,9 +115,9 @@ batch5scaled_v2[1:220] <-
   scale(batch5scaled_v2[1:220], center = TRUE, scale = TRUE)
 hist(batch5scaled_v2$metab1)
 
-colnames(batch5scaled_v2)<- c(metab.look.up.table.batch5$orig.metab.names, "subject", "Age.e" , "visitcode.x",   "Age.e.updated", "Sex", "Education", "FC_DK", "PC1", "PC2", "PC3", "PC4", "pedid", "BirthYear", "Alive", "Age")
+colnames(batch5scaled_v2)<- c(metab.look.up.table.batch5$orig.metab.names, "subject", "Age.e", "visitcode.x",   "Age.e.updated", "Sex", "Education", "FC_DK", "PC1", "PC2", "PC3", "PC4", "pedid", "BirthYear", "Alive", "Age")
 
-batch4scaled_v2 <- analysis.final.no.missing.dat.batch6
+batch4scaled_v2 <- analysis.final.no.missing.dat.batch4.visit2
 # scale the metabolites
 batch4scaled_v2[1:188] <-
   scale(batch4scaled_v2[1:188], center = TRUE, scale = TRUE)
