@@ -22,31 +22,31 @@ library(webshot)
 library(igraph)
 library(RColorBrewer)
 
-llfs.pheno.dir <- "/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/paola_analysis/generate_list_metabolomics/"
+llfs.pheno.dir <- "<Directory of Data>"
 
-std.name.table.file <- "/restricted/projectnb/necs/Zeyuan_Analysis/Network/Metabolite_network_LLFS/ColorNnE_Age_Jun14/TableS13_Overall_Summary.03.24.2024.xlsx"
+std.name.table.file <- "<Path to Supplementary Table S13>"
 
-llfs.metab4.dir <- "/restricted/projectnb/llfs/LLFS_omics/LLFS_metabolomics/batch4_20220506/"
+llfs.metab4.dir <- "<Directory of Metabolite Data Batch4>"
 
-llfs.metab5.dir <- "/restricted/projectnb/llfs/LLFS_omics/LLFS_metabolomics/batch5_20221220/"
+llfs.metab5.dir <- "<Directory of Metabolite Data Batch5>"
 ```
 
 ## Read in file
 ```{r}
 llfs.data.batch4 <- read.csv(paste0(llfs.pheno.dir, 
-                                    "llfs.data.metabolom.batch4.survival.03.30.2023.csv"), 
+                                    "<Phenotype Data Batch4 File Name>"), 
                              header=T, na.strings = c("", NA))
 
 met.4.llfs <- readr::read_csv(paste0(llfs.metab4.dir,
-                                     "lipids_normalized.20220506_v2.csv"))
+                                     "<Metabolite Data Batch4 File Name>"))
 
 
 llfs.data.batch5 <- read.csv(paste0(llfs.pheno.dir,
-                              "llfs.data.metabolom.batch5.survival.03.30.2023.csv"), 
+                              "<Phenotype Data Batch5 File Name>"), 
                              header=T, na.strings = c("", NA))
 
 met.5.llfs <- readr::read_csv(paste0(llfs.metab5.dir,
-                        "peak_areas_pos_neg_merged_imputed_normalized.20221220.csv"))
+                        "<Metabolite Data Batch5 File Name>"))
 
 met.llfs <- inner_join(met.4.llfs, met.5.llfs)
 
@@ -256,7 +256,7 @@ dat.input <- dat.norm.clean %>%
 ```
 
 ```{r  eval=FALSE}
-source("/restricted/projectnb/necs/Zeyuan_Analysis/Network/function/famBootstrap_Jun24_2024.R")
+source("<Network Function Script>")
 
 metab.net.list <- famBootstrap(dat = dat.input, boot.size=1000, cluster.sample.ratio=1, replace=T, alpha=0.05, rho=c(0, 0.025, 0.05, 0.075, 0.08, 0.09, 0.1, 0.125, 0.15, 0.2, 0.3))
 
