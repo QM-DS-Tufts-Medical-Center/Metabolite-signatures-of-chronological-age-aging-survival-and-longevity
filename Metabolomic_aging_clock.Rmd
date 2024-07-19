@@ -29,7 +29,6 @@ necs_metabolomics<- read.csv("data.set.clean.csv")
 metab.look.up.table.batch4.visit2<- read.csv(paste0(dir,"batch4_visit2_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch4.visit2<- read.csv(paste0(dir,"batch4_visit2_log_metab.csv"))
 analysis.final.no.missing.dat.batch5.visit2<- read.csv(paste0(dir, "batch5_log_metab_visit2_updated.csv"))
-analysis.final.no.missing.dat.batch5.visit1<- read.csv(paste0(dir, "batch5_log_metab_visit1_updated.csv"))
 ```
 
 ```{r include = FALSE}
