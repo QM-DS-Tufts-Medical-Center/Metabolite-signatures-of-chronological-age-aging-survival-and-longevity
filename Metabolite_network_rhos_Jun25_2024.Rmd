@@ -1,0 +1,403 @@
+---
+title: "Polar and Lipid Metabolites Sparse Network"
+author: Zeyuan Song
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+---
+
+
+## initiating
+```{r}
+library(data.table)
+library(dplyr)
+library(igraph)
+library(ggplot2)
+library(rlist)
+library(visNetwork)
+library(webshot)
+library(igraph)
+library(RColorBrewer)
+
+llfs.pheno.dir <- "/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/paola_analysis/generate_list_metabolomics/"
+
+std.name.table.file <- "/restricted/projectnb/necs/Zeyuan_Analysis/Network/Metabolite_network_LLFS/ColorNnE_Age_Jun14/TableS13_Overall_Summary.03.24.2024.xlsx"
+
+llfs.metab4.dir <- "/restricted/projectnb/llfs/LLFS_omics/LLFS_metabolomics/batch4_20220506/"
+
+llfs.metab5.dir <- "/restricted/projectnb/llfs/LLFS_omics/LLFS_metabolomics/batch5_20221220/"
+```
+
+## Read in file
+```{r}
+llfs.data.batch4 <- read.csv(paste0(llfs.pheno.dir, 
+                                    "llfs.data.metabolom.batch4.survival.03.30.2023.csv"), 
+                             header=T, na.strings = c("", NA))
+
+met.4.llfs <- readr::read_csv(paste0(llfs.metab4.dir,
+                                     "lipids_normalized.20220506_v2.csv"))
+
+
+llfs.data.batch5 <- read.csv(paste0(llfs.pheno.dir,
+                              "llfs.data.metabolom.batch5.survival.03.30.2023.csv"), 
+                             header=T, na.strings = c("", NA))
+
+met.5.llfs <- readr::read_csv(paste0(llfs.metab5.dir,
+                        "peak_areas_pos_neg_merged_imputed_normalized.20221220.csv"))
+
+met.llfs <- inner_join(met.4.llfs, met.5.llfs)
+
+n.metab <- ncol(met.llfs)-2
+orig.metab.names <- names(met.llfs)[3:ncol(met.llfs)]
+fake.metab.names <- paste0("metab", c(1:n.metab))
+
+std.names.dat <- readxl::read_excel(std.name.table.file)
+
+metab.look.up.table0 <- data.frame( orig.metab.names, fake.metab.names) %>%
+  mutate(orig.metab.names=case_when(orig.metab.names == "dCer_NS 39:1"~"Cer 39:1",
+                                    orig.metab.names == "dCer_NS 33:1"~"Cer 33:1",
+                                    orig.metab.names == "dCer_NS 34:1"~"Cer 34:1",
+                                    orig.metab.names == "dCer_NS 40:1"~"Cer 40:1",
+                                    orig.metab.names == "dCer_NS 41:1"~"Cer 41:1",
+                                    orig.metab.names == "dCer_NS 42:1"~"Cer 42:1",
+                                    orig.metab.names == "dCer_NS 40:2"~"Cer 40:2",
+                                    orig.metab.names == "dCer_NS 41:2"~"Cer 41:2",
+                                    orig.metab.names == "dCer_NS 42:2"~"Cer 42:2",
+                                    orig.metab.names == "dCer_NS 42:3"~"Cer 42:3",
+                                    orig.metab.names == "dCer_NS 43:1"~"Cer 43:1",
+                                    orig.metab.names == "dCer_NS 43:2"~"Cer 43:2",
+                                    orig.metab.names == "N2_N2-Dimethylguanosine"~"N2,N2-Dimethylguanosine",
+                                    orig.metab.names == "TREHALOSE"~"Sucrose",
+                                    TRUE ~ orig.metab.names))
+
+sum(std.names.dat$Compound.Name %in% metab.look.up.table0$orig.metab.names)
+
+metab.look.up.table1 <- left_join(metab.look.up.table0, 
+                                 std.names.dat %>% 
+                                   select(Compound.Name, Standardized.name, 
+                                          LLFS.age.fdr.05, LLFS.age.effect),
+                                 by=c("orig.metab.names"="Compound.Name")
+                                 )
+
+## keep origin names if standard names not exist
+## keep CAR 10:0 as Decanoylcarnitine; CAR 4:0 as Butyrylcarnitine; CAR 8:0 as Octanoylcarnitine
+metab.look.up.table <- metab.look.up.table1 %>%
+  mutate(
+    color = c(rep("lightcoral", 188), rep("dodgerblue", 220)),
+    Standardized.names=ifelse(
+    is.na(Standardized.name)|Standardized.name=="-"|Standardized.name=="*", orig.metab.names, Standardized.name)
+    ) %>%
+  mutate(
+    color = case_when(
+    Standardized.names%in%c("3-Dehydroxycarnitine", "Carnitine", "CAR 10:0", "CAR 10:1","CAR 11:1", "CAR 12:1", "CAR 13:1", "CAR 14:1", "CAR 16:0", "CAR 2:0", "CAR 3:0", "CAR 4:0", "CAR 6:0", "CAR 8:0", "CAR DC5:0") ~ "yellow",
+    TRUE ~ color),
+    Standardized.names = case_when(
+    Standardized.names=="CAR 10:0" ~ "Decanoylcarnitine",
+    Standardized.names=="CAR 4:0" ~ "Butyrylcarnitine",
+    Standardized.names=="CAR 8:0" ~ "Octanoylcarnitine",
+    TRUE ~ Standardized.names
+  ),
+  shape = case_when(LLFS.age.effect > 0 ~ "triangle",
+                    LLFS.age.effect < 0 ~ "dot"),
+  color.new = case_when(color=="lightcoral" & shape =="triangle" ~ "brown",
+                        color=="dodgerblue" & shape =="triangle" ~ "navy",
+                        color=="yellow" & shape =="triangle" ~ "goldenrod",
+                        TRUE ~ color)
+  ) %>%
+  group_by(Standardized.names) %>%
+  mutate(Standardized.names=ifelse(row_number()>1, 
+                                   paste0("batch5",Standardized.names),
+                                   Standardized.names)
+         ) %>%
+  ungroup() %>%
+  filter(LLFS.age.fdr.05 == "TRUE")
+
+
+names(met.llfs)[3:ncol(met.llfs)] <- fake.metab.names
+
+metab.look.up.table[metab.look.up.table$orig.metab.names == "Sucrose",]
+
+#saveRDS(metab.look.up.table, "metab.look.up.table.rds")
+```
+
+# Dataformatting--for now analyze data at visit 1
+```{r }
+dim(met.llfs)
+table(met.llfs$visitcode)
+ 
+met.llfs.vst1 <- met.llfs %>%
+  filter(visitcode==1 | visitcode==4)
+
+dim(met.llfs.vst1)
+
+met.data.1 <- as.data.frame(t(met.llfs.vst1[ , 3:ncol(met.llfs.vst1)]))
+dim(met.data.1)
+colnames(met.data.1) <- met.llfs.vst1$subject
+```
+
+# Data visualization and outlier detection
+```{r}
+hist(apply(met.data.1,2,mean))
+summary(apply(met.data.1,2,mean))
+boxplot(log(met.data.1))
+
+pca.res <- prcomp(log(t(met.data.1)), scale = T)
+summary(pca.res)
+plot(pca.res)
+plot(pca.res$x[,1:2])
+outliers <- names(which(pca.res$x[,1] < -25))
+print(outliers)
+ok.samples <- setdiff(met.llfs.vst1$subject, outliers)
+new.met.data.1 <- met.data.1 %>%
+  select(as.character(ok.samples))
+
+pca.res1 <- prcomp(log(t(new.met.data.1)), scale. = T)
+summary(pca.res1)
+plot(pca.res1)
+plot(pca.res1$x[,1:2])
+  
+# Drop outliers  
+met.llfs.vst1 <- met.llfs.vst1[match(as.character(ok.samples), met.llfs.vst1$subject),]
+  
+met.data.1 <- as.data.frame(t(met.llfs.vst1[ , 3:ncol(met.llfs.vst1)]))
+dim(met.data.1)
+colnames(met.data.1) <- met.llfs.vst1$subject
+#No evident bias -- good normalization
+```
+
+# Analysis data
+```{r}
+llfs.data <- inner_join(llfs.data.batch4, llfs.data.batch5)
+llfs.master.vst1 <- llfs.data %>%
+  mutate(subject=as.integer(subject)) %>%
+  mutate(pedid=as.integer(pedid)) %>%
+  select(subject, pedid)
+
+analysis.master.dat <- left_join(met.llfs.vst1, llfs.master.vst1)
+dim(analysis.master.dat)
+ 
+length(unique(analysis.master.dat$subject))
+length(unique(analysis.master.dat$pedid))
+
+metab_llfs <- analysis.master.dat %>%
+  select(subject,pedid, rownames(met.data.1))
+
+metab_llfs[,rownames(met.data.1)] <- log(metab_llfs[,rownames(met.data.1)])
+```
+
+
+# outliers detection
+```{r}
+dat.norm <- metab_llfs[3:ncol(metab_llfs)]
+  
+#counts in either top or btm 5%
+quant_ind <- function(x){
+    quant <- quantile(x,c(0.05,0.95), na.rm=T)
+    ifelse(x<=quant[1]|x>=quant[2],1,0)
+}
+mat <- apply(dat.norm,2,quant_ind)
+count <- apply(mat,1,function(x)sum(x, na.rm=T))
+
+summary(count)
+
+#png("top_bot_scree_plot.png")
+plot(x=1:nrow(dat.norm), y=sort(count))
+#dev.off()
+
+count[which(count > 160)]
+
+row.exclude.by.tb <- which(count > 160)
+
+sd_check <- function(x){
+  mean.metab <- mean(x, na.rm = T)
+  sd.metab <- sd(x, na.rm = T)
+  ifelse(x < mean.metab-4*sd.metab | x > mean.metab+4*sd.metab, 1, 0)
+}
+mat <- apply(dat.norm,2,sd_check)
+metab.count <- apply(mat,2,sum)
+
+plot(x=1:length(metab.count), y=sort(metab.count))
+
+metab.count[which(metab.count > 50)]
+
+list.exclude.by.sd <- names(which(metab.count>50))
+
+dat.norm.clean <- dat.norm %>%
+  select(-all_of(list.exclude.by.sd)) %>%
+  slice(-row.exclude.by.tb) %>%
+  mutate(subject.ID = metab_llfs$subject[-row.exclude.by.tb], fam.ID = metab_llfs$pedid[-row.exclude.by.tb])
+  
+mat1 <- apply(dat.norm.clean,2,quant_ind)
+count1 <- apply(mat1,1,function(x)sum(x, na.rm=T))
+
+plot(x=1:nrow(dat.norm.clean), y=sort(count1))
+
+mat2 <- apply(dat.norm.clean,2,sd_check)
+metab.count2 <- apply(mat2,2,sum)
+
+plot(x=1:length(metab.count2), y=sort(metab.count2))
+
+
+#print removed metabolites
+metab.look.up.table[metab.look.up.table$fake.metab.names %in% list.exclude.by.sd,]$orig.metab.names
+```
+
+# learn networks
+```{r}
+age.metab.list <- colnames(dat.norm.clean)[colnames(dat.norm.clean)%in%metab.look.up.table$fake.metab.names]
+
+dat.input <- dat.norm.clean %>%
+  rename(sample.id=subject.ID,
+         cluster.id=fam.ID) %>%
+  select(all_of(c(age.metab.list, "sample.id", "cluster.id")))
+```
+
+```{r  eval=FALSE}
+source("/restricted/projectnb/necs/Zeyuan_Analysis/Network/function/famBootstrap_Jun24_2024.R")
+
+metab.net.list <- famBootstrap(dat = dat.input, boot.size=1000, cluster.sample.ratio=1, replace=T, alpha=0.05, rho=c(0, 0.025, 0.05, 0.075, 0.08, 0.09, 0.1, 0.125, 0.15, 0.2, 0.3))
+
+saveRDS(metab.net.list, "metab.net.list.Jun25.rds")
+
+v.names <- metab.look.up.table$Standardized.names[metab.look.up.table$fake.metab.names %in% names(dat.input)[1:(ncol(dat.input)-2)]]
+
+saveRDS(v.names, "std_names.rds")
+```
+
+```{r}
+metab.net.list <- readRDS("metab.net.list.Jun25.rds")
+
+v.names <- readRDS("std_names.rds")
+
+rho <- metab.net.list$rho
+
+num.edges <- metab.net.list$num.edges
+
+plot(rho, num.edges)
+
+p.cor.mat <- metab.net.list$p.cor.mat
+mat.rho <- metab.net.list$adj.mat.rho
+
+for(r in rho){
+  rownames(mat.rho[[which(rho==r)]]) <- v.names
+  colnames(mat.rho[[which(rho==r)]]) <- v.names
+}
+
+rownames(p.cor.mat) <- v.names
+colnames(p.cor.mat) <- v.names
+
+p.cor.mat["3-Indolepropionic acid","3 Hydroxy 2 methylpyridine"]
+```
+
+## graph summary
+```{r}
+out_sumry_tbl1 <- c()
+out_sumry_tbl2 <- c()
+
+for(r in rho){
+  graph_rho <- graph_from_adjacency_matrix(mat.rho[[which(rho==r)]], 
+                                           mode = "undirected")
+  clusters_rho <- components(graph_rho)
+  c.num1 <- clusters_rho$no
+  c.size1 <- sum(clusters_rho$csize)
+  c.med1 <- median(clusters_rho$csize)
+  out_sumry_tbl1 <- rbind(out_sumry_tbl1, 
+                         c(r, c.size1, c.num1, c.size1/c.num1, c.med1)
+                         )
+  c.num2 <- c.num1-sum(clusters_rho$csize==1)
+  c.size2 <- sum(clusters_rho$csize[clusters_rho$csize!=1])
+  c.med2 <- median(clusters_rho$csize[clusters_rho$csize!=1])
+  out_sumry_tbl2 <- rbind(out_sumry_tbl2, 
+                         c(r, c.size2, c.num2,  c.size2/c.num2, c.med2)
+                         )
+
+}
+
+colnames(out_sumry_tbl1) <- c("rho_0", "total.nodes", "cluster.number", "avg.size", "median.size")
+colnames(out_sumry_tbl2) <- c("rho_0", "total.nodes", "cluster.number", "avg.size", "median.size")
+write.csv(out_sumry_tbl1, "cluster_summary_table_Jun25_2024.csv")
+write.csv(out_sumry_tbl2, "cluster_no_singleton_summary_table_Jun25_2024.csv")
+```
+
+## format
+```{r}
+v.color <- metab.look.up.table$color.new[metab.look.up.table$fake.metab.names %in% names(dat.input)[1:(ncol(dat.input)-2)]]
+
+v.shape <- metab.look.up.table$shape[metab.look.up.table$fake.metab.names %in% names(dat.input)[1:(ncol(dat.input)-2)]]
+
+nodes.rho <- data.frame(id=v.names, 
+                        label=v.names,
+                        color=v.color,
+                        shape=v.shape,
+                        font.size = 50,
+                        value=100)
+
+#color
+pc.mat.low <- matrix(0,nrow(nodes.rho),nrow(nodes.rho)) 
+pc.mat.low[lower.tri(pc.mat.low, diag = T)] <- p.cor.mat[lower.tri(p.cor.mat, diag = T)]
+colnames(p.cor.mat) <- v.names
+rownames(p.cor.mat) <- v.names
+edges.color <- as.data.frame(as.table(p.cor.mat-pc.mat.low))
+colnames(edges.color) <- c("from", "to", "color_value")
+
+color_by_value <- function(value) {
+  if (value > 0) {
+  #  blue_intensity <- min(1, value*100)  # Adjust divisor for desired blue intensity
+  #  color <- rgb(0, 0, blue_intensity)
+    color <- "blue"
+  } else if (value < 0) {
+  #  red_intensity <- min(1, abs(value)*100)  # Adjust divisor for desired red intensity
+  #  color <- rgb(red_intensity, 0, 0)
+    color <- "red"
+  } else {
+    color <- "white"
+  }
+  return(color)
+}
+
+edges.color$colors <- sapply(as.numeric(edges.color$color_value), color_by_value)
+
+nodes.sets <- list()
+edges.sets <- list()
+
+for(r in rho){
+  mat.low.rho <- matrix(0,nrow(nodes.rho),nrow(nodes.rho)) 
+  mat.rho.r <- mat.rho[[which(rho==r)]]
+  mat.low.rho[lower.tri(mat.low.rho, diag = T)] <- mat.rho.r[lower.tri(mat.rho.r, diag = T)]
+  edges.rho <- as.data.frame(as.table(mat.rho.r-mat.low.rho))
+  colnames(edges.rho) <- c("from", "to", "edge_value")
+  edges.rho$color <- edges.color$colors
+  edges.rho <- edges.rho[edges.rho$edge_value == 1, c("from", "to", "color")]
+  edges.sets <- list.append(edges.sets, edges.rho)
+  nodes.sets <- list.append(nodes.sets, nodes.rho %>% filter(id %in% c(edges.rho$from, edges.rho$to)))
+}
+
+```
+
+## graph with Bootstrap at varing rho
+```{r}
+set.seed(36)
+for(r in rho){
+ visNetwork(nodes.sets[[which(rho==r)]] %>% arrange(id), 
+            edges.sets[[which(rho==r)]],
+            main = "Metabolites Partial Correlation Network",
+            submain = paste0("partial correlations > ",r,"; blue edges are positive association; red edges are negative association; darker triangles are postively associated with age; lighter circles are negatively associated with age"),
+            height = 700,
+            width = "100%") %>%
+    visIgraphLayout(layout = "layout_with_fr") %>%
+    visNodes() %>%
+    visEdges(width = 2) %>%
+    visLegend() %>%
+    visOptions(nodesIdSelection = TRUE, highlightNearest = list(enabled = TRUE, degree = 1, labelOnly = T)) %>%
+    visSave(file = paste0("Metabolites_Network_rho_",r,".html"))
+}
+```
+
+
+
+
+
+
