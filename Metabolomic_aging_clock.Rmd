@@ -20,12 +20,12 @@ library(survminer)
 library(patchwork)
 
 # reading files
-dir<- "/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/ana_analysis/metabolomics_aging_clocks/data/"
+dir<- "data/"
 metab.look.up.table.batch4<-  read.csv(paste0(dir, "batch4_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch4 <- read.csv(paste0(dir, "batch4_log_metab.csv"))
 metab.look.up.table.batch5<- read.csv(paste0(dir,"batch5_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch5<- read.csv(paste0(dir,"batch5_log_metab.csv"))
-necs_metabolomics<- read.csv("/restricted/projectnb/necs/paola_analysis/metabolomics/necs_pilot/analysis/data.set.clean.csv")
+necs_metabolomics<- read.csv("data.set.clean.csv")
 metab.look.up.table.batch6<- read.csv(paste0(dir,"batch6_metab_look_up_table.csv"))
 analysis.final.no.missing.dat.batch6<- read.csv(paste0(dir,"batch6_log_metab.csv"))
 analysis.final.no.missing.dat.batch5.visit2<- read.csv(paste0(dir, "batch5_log_metab_visit2_updated.csv"))
@@ -139,7 +139,7 @@ metabolite_dat_v2<- merge(batch4scaled_v2, batch5scaled_v2[,!colnames(batch5scal
 ```{r include= FALSE}
 library("xlsx")
 # reading the list of metabolites associated with age
-resultsPaper<- read.xlsx("/restricted/projectnb/llfs/LinGA_protected/analysis/genomics/metabolomics/ana_analysis/metabolomics_aging_clocks/data/TableS1a_All_results_03.24.2024.xlsx", "all results", header=TRUE, colClasses=NA)
+resultsPaper<- read.xlsx("TableS1a_All_results_03.24.2024.xlsx", "all results", header=TRUE, colClasses=NA)
 # finding them in the LLFS data set
 metaboliteAge<- metabolite_dat[, colnames(metabolite_dat) %in% c(resultsPaper[resultsPaper$age.fdr.05==TRUE,]$Compound.Name, varToRemove)]
 ```
